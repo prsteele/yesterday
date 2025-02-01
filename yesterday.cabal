@@ -1,0 +1,66 @@
+cabal-version:      3.0
+name:               yesterday
+version:            0.1.0.0
+license:            MIT
+license-file:       LICENSE
+author:             Patrick Steele
+maintainer:         prsteele@proton.me
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+common extensions
+    default-extensions:
+        DeriveFunctor
+      , DeriveGeneric
+      , DeriveTraversable
+      , FlexibleContexts
+      , FlexibleInstances
+      , GeneralizedNewtypeDeriving
+      , LambdaCase
+      , MultiParamTypeClasses
+      , OverloadedStrings
+      , Rank2Types
+      , TupleSections
+
+library
+    import:           warnings
+                    , extensions
+    exposed-modules:  Yesterday
+    hs-source-dirs:   src
+    default-language: Haskell2010
+    build-depends:    base ^>=4.18.2.1
+                    , containers
+                    , megaparsec
+                    , mtl
+                    , recursion-schemes
+                    , text
+                    , vector
+
+executable yesterday
+    import:           warnings
+                    , extensions
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.18.2.1,
+        yesterday
+
+    hs-source-dirs:   app
+    default-language: Haskell2010
+
+test-suite yesterday-test
+    import:           warnings
+                    , extensions
+    default-language: Haskell2010
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Spec.hs
+    other-modules:    YesterdaySpec
+    build-depends:
+        base ^>=4.18.2.1
+      , yesterday
+      , hspec
+      , HUnit
+      , QuickCheck
