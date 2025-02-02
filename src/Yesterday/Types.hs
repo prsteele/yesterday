@@ -1,7 +1,6 @@
 module Yesterday.Types where
 
 import qualified Data.Text as T
-import Data.Tree
 
 data Function = Function
   { funName :: T.Text,
@@ -20,6 +19,7 @@ data Clause = Clause Expr [Action]
 
 data Expr
   = ELit Value
+  | EHist Expr [HistOp]
   | EAdd Expr Expr
   | EMul Expr Expr
   | ESub Expr Expr
@@ -54,10 +54,8 @@ data Value
     DoubleLit
   | -- | A string literal
     StringLit
-  | -- | A variable, possibly followed by history operations
-    VarLiteral Variable [HistOp]
+  | -- | A variable
+    VarLiteral Variable
   | -- | A dereferenced variable, e.g. @x
     VarDeref
-  | -- | A computation history
-    History [Tree Value]
   deriving (Show)

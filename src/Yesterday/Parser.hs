@@ -3,11 +3,13 @@ module Yesterday.Parser where
 import Data.Char (isSpace)
 import Data.Functor
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Data.Void
 import System.Exit
 import Text.Megaparsec hiding (parse)
 import Text.Megaparsec.Char as MC
 import Text.Megaparsec.Char.Lexer as L
+import Yesterday.Types
 
 type Parser = Parsec Void T.Text
 
@@ -39,3 +41,17 @@ linesOf p = do
 
 notSpace :: Parser Char
 notSpace = satisfy (not . isSpace)
+
+parseFunction :: Parser Function
+parseFunction = undefined
+
+parseFile :: FilePath -> Parser a -> IO a
+parseFile fname parser = do
+  contents <- TIO.readFile fname
+  let result = runParser parser fname contents
+  case result of
+    Left err -> putStrLn (errorBundlePretty err) >> exitFailure
+    Right answer -> pure answer
+
+f :: IO Function
+f = parseFile "Whatever.time" parseFunction
