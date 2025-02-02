@@ -4,4 +4,5 @@ import Yesterday
 
 main :: IO ()
 main = do
-  putStrLn "oops"
+  _ <- parseDirectory "TODO"
+  pure ()

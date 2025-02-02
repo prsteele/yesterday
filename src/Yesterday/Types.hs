@@ -5,7 +5,7 @@ import qualified Data.Text as T
 data Function = Function
   { funName :: T.Text,
     parameters :: [Variable],
-    results :: [Variable],
+    result :: Variable,
     clauses :: [Clause]
   }
   deriving (Show)
@@ -20,6 +20,7 @@ data Clause = Clause Expr [Action]
 data Expr
   = ELit Value
   | EHist Expr [HistOp]
+  | EDeref Expr
   | EAdd Expr Expr
   | EMul Expr Expr
   | ESub Expr Expr
@@ -47,15 +48,11 @@ data Value
   = -- | The _ wildcard matching anything but the empty history
     AnyLit
   | -- | A boolean literal
-    BoolLit
+    BoolLit Bool
   | -- | An integer literal
-    IntegerLit
-  | -- | A double literal
-    DoubleLit
+    IntegerLit Integer
   | -- | A string literal
-    StringLit
+    StringLit T.Text
   | -- | A variable
-    VarLiteral Variable
-  | -- | A dereferenced variable, e.g. @x
-    VarDeref
+    Var Variable
   deriving (Show)

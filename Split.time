@@ -1,0 +1,6 @@
+u -> v
+null parity       :: parity <- !0~ <- !1
+-- or null parity :: parity <- !0~ <+ 1
+u~ & parity = 0 :: l <+ @u, u~, parity~^2
+u~ & parity = 1 :: r <+ @u, u~, parity~^1
+!? u & null v :: (v <+ l)~ <+ r ~

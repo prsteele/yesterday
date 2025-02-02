@@ -42,8 +42,82 @@ linesOf p = do
 notSpace :: Parser Char
 notSpace = satisfy (not . isSpace)
 
-parseFunction :: Parser Function
-parseFunction = undefined
+identifier :: Parser T.Text
+identifier = T.append <$> (T.singleton <$> letterChar) <*> (T.pack <$> many alphaNumChar)
+
+clause :: Parser Clause
+clause = do
+  predicate <- expr
+  acts <- many action
+  pure $ Clause predicate acts
+
+expr :: Parser Expr
+expr = exprCall <|> exprLit
+  -- TODO: exprGroup is `(` expr `)` to reset precedence
+
+exprLit :: Parser Expr
+exprLit = ELit <$> choice
+  [ exprAnyLit
+  , exprBoolLit
+  , exprIntegerLit
+  , exprStringLit
+  , exprVar -- Last because I don't want to really implement keywords
+  ]
+
+exprCall :: Parser Expr
+exprCall = do
+  callee <- expr
+  args <- many (space1 *> expr)
+  pure $ ECall callee args
+
+exprVar :: Parser Value
+exprVar = do
+  Var . Variable <$> identifier
+
+exprAnyLit :: Parser Value
+exprAnyLit = chunk "_" <* space1 $> AnyLit
+
+exprBoolLit :: Parser Value
+exprBoolLit =
+  choice [
+    chunk "true" $> BoolLit True,
+    chunk "false" $> BoolLit False
+  ]
+
+exprIntegerLit :: Parser Value
+exprIntegerLit = IntegerLit <$> integer
+
+exprStringLit :: Parser Value
+exprStringLit = do
+  StringLit <$> (quote *> innerChars <* quote)
+
+quote :: Parser T.Text
+quote = T.singleton <$> char '"'
+
+innerChars :: Parser T.Text
+innerChars = T.pack <$> many (satisfy (not . \c -> c == '"'))
+
+action :: Parser Action
+action = undefined
+
+parseFunction :: T.Text -> Parser Function
+parseFunction name = do
+  inputs <- many (try (identifier <* space1))
+  _ <- MC.space
+  _ <- chunk "->"
+  _ <- space1
+  output <- identifier
+  _ <- MC.space
+  _ <- eol
+
+  arms <- linesOf clause
+
+  pure Function {
+    funName = name,
+    parameters = map (\n -> Variable { varName = n }) inputs,
+    result = Variable { varName = output },
+    clauses = arms
+  }
 
 parseFile :: FilePath -> Parser a -> IO a
 parseFile fname parser = do
@@ -52,6 +126,3 @@ parseFile fname parser = do
   case result of
     Left err -> putStrLn (errorBundlePretty err) >> exitFailure
     Right answer -> pure answer
-
-f :: IO Function
-f = parseFile "Whatever.time" parseFunction
