@@ -37,7 +37,6 @@ A time-based programming language.
 
 *** Refocus to root
 
-~ToRoot.time~
 #+begin_src prog
   x -> x
   x~ :: x~
@@ -49,9 +48,8 @@ A time-based programming language.
   x y -> result
   x~   & y~   & x <= y      :: z <+ @x, x~
   x~   & y~   & x >  y      :: z <+ @y, y~
-  !? x & y~                 :: z <~ Reverse y, ToRoot y
-  x~   & !? y               :: z <~ Reverse x, ToRoot x
-  !? x & !? y & null result :: result <- Reverse z
+  !? x & y~   & null result :: result <~ z <- Reverse y
+  x~   & !? y & null result :: result <~ z <- Reverse x
 #+end_src
 
 *** Divide a list in two

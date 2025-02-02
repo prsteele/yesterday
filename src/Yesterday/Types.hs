@@ -1,12 +1,12 @@
 module Yesterday.Types where
 
+import Data.IORef
 import qualified Data.Text as T
 
 data Function = Function
-  { funName :: T.Text,
-    parameters :: [Variable],
-    result :: Variable,
-    clauses :: [Clause]
+  { funParameters :: [Variable],
+    funResult :: Variable,
+    funClauses :: [Clause]
   }
   deriving (Show)
 
@@ -53,6 +53,14 @@ data Value
     IntegerLit Integer
   | -- | A string literal
     StringLit T.Text
-  | -- | A variable
+  | -- | A variable (history)
     Var Variable
+  | -- | A function
+    Func Function
   deriving (Show)
+
+data History = History
+  { _parent :: Maybe History,
+    _children :: IORef [IORef History],
+    _payload :: Maybe (Either History Value)
+  }

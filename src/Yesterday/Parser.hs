@@ -1,11 +1,11 @@
 module Yesterday.Parser where
 
+import Data.Bifunctor
 import Data.Char (isSpace)
 import Data.Functor
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Void
-import System.Exit
 import Text.Megaparsec hiding (parse)
 import Text.Megaparsec.Char as MC
 import Text.Megaparsec.Char.Lexer as L
@@ -13,13 +13,11 @@ import Yesterday.Types
 
 type Parser = Parsec Void T.Text
 
-parse :: Parser a -> T.Text -> Either (ParseErrorBundle T.Text Void) a
-parse p = runParser p "<string>"
+parse :: FilePath -> Parser a -> T.Text -> Either T.Text a
+parse fname p = first (T.pack . errorBundlePretty) . runParser p fname
 
-parseIO :: Parser a -> T.Text -> IO a
-parseIO p x = case parse p x of
-  Left err -> putStrLn (errorBundlePretty err) >> exitFailure
-  Right result -> pure result
+parseFile :: FilePath -> Parser a -> IO (Either T.Text a)
+parseFile fname parser = parse fname parser <$> TIO.readFile fname
 
 integer :: Parser Integer
 integer = L.decimal
@@ -46,23 +44,23 @@ identifier :: Parser T.Text
 identifier = T.append <$> (T.singleton <$> letterChar) <*> (T.pack <$> many alphaNumChar)
 
 clause :: Parser Clause
-clause = do
-  predicate <- expr
-  acts <- many action
-  pure $ Clause predicate acts
+clause = Clause <$> expr <*> many action
 
 expr :: Parser Expr
 expr = exprCall <|> exprLit
-  -- TODO: exprGroup is `(` expr `)` to reset precedence
+
+-- TODO: exprGroup is `(` expr `)` to reset precedence
 
 exprLit :: Parser Expr
-exprLit = ELit <$> choice
-  [ exprAnyLit
-  , exprBoolLit
-  , exprIntegerLit
-  , exprStringLit
-  , exprVar -- Last because I don't want to really implement keywords
-  ]
+exprLit =
+  ELit
+    <$> choice
+      [ exprAnyLit,
+        exprBoolLit,
+        exprIntegerLit,
+        exprStringLit,
+        exprVar -- Last because I don't want to really implement keywords
+      ]
 
 exprCall :: Parser Expr
 exprCall = do
@@ -79,10 +77,10 @@ exprAnyLit = chunk "_" <* space1 $> AnyLit
 
 exprBoolLit :: Parser Value
 exprBoolLit =
-  choice [
-    chunk "true" $> BoolLit True,
-    chunk "false" $> BoolLit False
-  ]
+  choice
+    [ chunk "true" $> BoolLit True,
+      chunk "false" $> BoolLit False
+    ]
 
 exprIntegerLit :: Parser Value
 exprIntegerLit = IntegerLit <$> integer
@@ -100,8 +98,8 @@ innerChars = T.pack <$> many (satisfy (not . \c -> c == '"'))
 action :: Parser Action
 action = undefined
 
-parseFunction :: T.Text -> Parser Function
-parseFunction name = do
+yesterdayFunction :: Parser Function
+yesterdayFunction = do
   inputs <- many (try (identifier <* space1))
   _ <- MC.space
   _ <- chunk "->"
@@ -109,20 +107,14 @@ parseFunction name = do
   output <- identifier
   _ <- MC.space
   _ <- eol
-
   arms <- linesOf clause
 
-  pure Function {
-    funName = name,
-    parameters = map (\n -> Variable { varName = n }) inputs,
-    result = Variable { varName = output },
-    clauses = arms
-  }
+  pure
+    Function
+      { funParameters = map (\n -> Variable {varName = n}) inputs,
+        funResult = Variable {varName = output},
+        funClauses = arms
+      }
 
-parseFile :: FilePath -> Parser a -> IO a
-parseFile fname parser = do
-  contents <- TIO.readFile fname
-  let result = runParser parser fname contents
-  case result of
-    Left err -> putStrLn (errorBundlePretty err) >> exitFailure
-    Right answer -> pure answer
+parseModule :: FilePath -> IO (Either T.Text Function)
+parseModule fname = parseFile fname yesterdayFunction
