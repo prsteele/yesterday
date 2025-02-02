@@ -1,0 +1,54 @@
+* Yesterday
+
+A time-based programming language.
+
+** Examples
+
+*** Arithmetic
+
+#+begin_src prog
+  x y z -> sum
+  null sum :: sum <+ x + y + z
+
+  -- or
+  init sum !(x + y + z)
+#+end_src
+
+*** Printing
+
+#+begin_src prog
+  -> ?
+  null n :: n <+ 0
+  n~ :: n <+ @n + 1, write n
+#+end_src
+
+*** Reverse a list
+
+#+begin_src prog
+  x -> y
+  x~ :: y <+ @x, x <- x~
+#+end_src
+
+*** Simplify history
+
+#+begin_src prog
+  x -> z
+  x~ /\ z~ :: z <- Reverse (Reverse x)
+#+end_src
+
+*** Refocus to root
+
+#+begin_src prog
+  x -> x
+  x~ :: x <- x~
+#+end_src
+
+*** Merging two sorted lists
+
+#+begin_src prog
+  x y -> z
+  x~     /\ y~     /\ x <= y :: z <+ @x, x <- x~
+  x~     /\ y~     /\ x >  y :: z <+ @y, y <- y~
+  null x /\ y~     :: z <~ Reverse y, y <- ToRoot y
+  x~     /\ null y :: z <~ Reverse x, x <- ToRoot x
+#+end_src
