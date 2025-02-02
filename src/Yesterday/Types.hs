@@ -1,6 +1,7 @@
 module Yesterday.Types where
 
 import Data.IORef
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 
 data Function = Function
@@ -12,7 +13,7 @@ data Function = Function
 
 newtype Variable = Variable
   {varName :: T.Text}
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data Clause = Clause Expr [Action]
   deriving (Show)
@@ -31,8 +32,8 @@ data Expr
   deriving (Show)
 
 data HistOp
-  = HistParent Int
-  | HistChild Int
+  = HistParent Expr
+  | HistChild Expr
   deriving (Show)
 
 data Action
@@ -60,7 +61,13 @@ data Value
   deriving (Show)
 
 data History = History
-  { _parent :: Maybe History,
-    _children :: IORef [IORef History],
+  { _var :: Maybe Variable,
+    _parent :: Maybe History,
+    _children :: IORef [History],
     _payload :: Maybe (Either History Value)
+  }
+
+data Frame = Frame
+  { _currentFunc :: Function,
+    _histories :: IORef (M.Map Variable History)
   }
