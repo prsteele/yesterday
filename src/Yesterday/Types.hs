@@ -38,7 +38,9 @@ data HistOp
 
 data Action
   = -- | Computation evolution.
-    Gets Variable Expr
+    Gets Expr Expr
+  | -- | Append new value to history
+    PlusGets Expr Expr
   | -- | Print to stdout
     WriteStdout Expr
   | -- | Print to stderr

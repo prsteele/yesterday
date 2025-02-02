@@ -160,6 +160,21 @@ evalDiv :: Expr -> Expr -> App Integer
 evalDiv lexpr rexpr = do
   (evalToInt lexpr) / (evalToInt rexpr)
 
+getRoot :: History -> History
+getRoot hist = do
+  case (parent hist) of
+    Nothing -> pure hist
+    Just h -> getRoot h
+
+copyHist :: History -> T.Text -> History
+copyHist hist name = undefined
+
+evalGets :: Expr -> Expr -> App History
+evalGets lexpr rexpr = do
+  lhist <- evalToHist lexpr
+  rhist <- evalToHist rexpr
+
+
 evalToFun :: Expr -> App Function
 evalToFun = undefined
 
