@@ -9,9 +9,6 @@ A time-based programming language.
 #+begin_src prog
   x y z -> sum
   null sum :: sum <+ x + y + z
-
-  -- or
-  init sum !(x + y + z)
 #+end_src
 
 *** Printing
@@ -24,6 +21,7 @@ A time-based programming language.
 
 *** Reverse a list
 
+~Reverse~
 #+begin_src prog
   x -> y
   x~ :: y <+ @x, x <- x~
@@ -31,24 +29,53 @@ A time-based programming language.
 
 *** Simplify history
 
+~Simplify~
 #+begin_src prog
   x -> z
-  x~ /\ z~ :: z <- Reverse (Reverse x)
+  x~ & null z :: z <- Reverse (Reverse x)
 #+end_src
 
 *** Refocus to root
 
+~ToRoot.time~
 #+begin_src prog
   x -> x
-  x~ :: x <- x~
+  x~ :: x~
 #+end_src
 
 *** Merging two sorted lists
 
 #+begin_src prog
-  x y -> z
-  x~     /\ y~     /\ x <= y :: z <+ @x, x <- x~
-  x~     /\ y~     /\ x >  y :: z <+ @y, y <- y~
-  null x /\ y~     :: z <~ Reverse y, y <- ToRoot y
-  x~     /\ null y :: z <~ Reverse x, x <- ToRoot x
+  x y -> result
+  x~   & y~   & x <= y      :: z <+ @x, x~
+  x~   & y~   & x >  y      :: z <+ @y, y~
+  !? x & y~                 :: z <~ Reverse y, ToRoot y
+  x~   & !? y               :: z <~ Reverse x, ToRoot x
+  !? x & !? y & null result :: result <- Reverse z
+#+end_src
+
+*** Divide a list in two
+
+~Divide~
+#+begin_src prog
+  u -> v
+  null parity     :: parity <+ 0 ~ <+ 1
+  u~ & parity = 0 :: l <+ @u, u~, parity~^2
+  u~ & parity = 1 :: r <+ @u, u~, parity~^1
+  !? u & null v :: v <+ l ~ <+ r ~
+#+end_src
+
+*** Merge sort
+
+~MergeSort~
+#+begin_src prog
+  u -> v
+  u~ :: v <- MergeSort_ u
+#+end_src
+
+~MergeSort_~
+#+begin_src prog
+  u -> v
+  null lr :: lr <- Divide u
+  null v  :: v <- Merge (MergeSort (lr ^)) (MergeSort (lr ^2))
 #+end_src
