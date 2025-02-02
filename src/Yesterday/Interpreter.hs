@@ -61,6 +61,10 @@ eval (ELit (Var v)) = Left <$> evalVar v
 eval (ELit value) = pure (Right value)
 eval (EHist hexpr ops) = Left <$> evalHistOps hexpr ops
 eval (EDeref expr) = evalDeref expr
+eval (EAdd lexpr rexpr) = evalAdd lexpr rexpr
+eval (EMul lexpr rexpr) = evalMul lexpr rexpr
+eval (ESub lexpr rexpr) = evalSub lexpr rexpr
+eval (EDiv lexpr rexpr) = evalDiv lexpr rexpr
 eval (ECall fexpr argExprs) = Left <$> evalFunCall fexpr argExprs
 
 evalVar :: Variable -> App History
@@ -139,6 +143,22 @@ evalDeref :: Expr -> App (Either History Value)
 evalDeref expr = do
   History _ _ _ payload <- evalToHist expr
   maybe paradox pure payload
+
+evalAdd :: Expr -> Expr -> App Integer
+evalAdd lexpr rexpr = do
+  (evalToInt lexpr) + (evalToInt rexpr)
+
+evalMul :: Expr -> Expr -> App Integer
+evalMul lexpr rexpr = do
+  (evalToInt lexpr) * (evalToInt rexpr)
+
+evalSub :: Expr -> Expr -> App Integer
+evalSub lexpr rexpr = do
+  (evalToInt lexpr) - (evalToInt rexpr)
+
+evalDiv :: Expr -> Expr -> App Integer
+evalDiv lexpr rexpr = do
+  (evalToInt lexpr) / (evalToInt rexpr)
 
 evalToFun :: Expr -> App Function
 evalToFun = undefined
