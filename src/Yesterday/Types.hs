@@ -29,6 +29,8 @@ data Expr
   | EEq Expr Expr
   | ENEq Expr Expr
   | ECall Expr [Expr]
+  | EAction Action Expr
+  | EAction2 Action Expr Expr
   deriving (Show)
 
 data HistOp
@@ -41,6 +43,8 @@ data Action
     Gets Expr Expr
   | -- | Append new value to history
     PlusGets Expr Expr
+  | -- | Refocus a history
+    Refocus Expr
   | -- | Print to stdout
     WriteStdout Expr
   | -- | Print to stderr
@@ -63,13 +67,17 @@ data Value
   deriving (Show)
 
 data History = History
-  { _var :: Maybe Variable,
-    _parent :: Maybe History,
+  { _parent :: Maybe (History, Int),
     _children :: IORef [History],
-    _payload :: Maybe (Either History Value)
+    _payload :: Maybe (Either Focus Value)
+  }
+
+data Focus = Focus
+  { _var :: Maybe Variable,
+    _history :: History
   }
 
 data Frame = Frame
   { _currentFunc :: Function,
-    _histories :: IORef (M.Map Variable History)
+    _foci :: IORef (M.Map Variable Focus)
   }

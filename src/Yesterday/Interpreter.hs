@@ -3,10 +3,12 @@ module Yesterday.Interpreter where
 import Control.Monad
 import Control.Monad.Reader
 import Data.Foldable
-import Data.IORef
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import System.FilePath
+import System.IO
+import UnliftIO
 import Yesterday.App
 import Yesterday.Parser (parseModule)
 import Yesterday.Types
@@ -35,20 +37,22 @@ importFunction path = do
       liftIO (writeIORef mref modules')
       pure f
 
-pprint :: Either History Value -> App T.Text
+pprint :: Either Focus Value -> App T.Text
 pprint (Right val) = pure (pprintValue val)
-pprint (Left history) = pprintHistory history
+pprint (Left focus) = pprintFocus focus
 
 pprintValue :: Value -> T.Text
 pprintValue = T.pack . show
 
-pprintHistory :: History -> App T.Text
-pprintHistory (History _ _ _ focus) = pprintFocus focus
+pprintFocus :: Focus -> App T.Text
+pprintFocus (Focus _ (History _ _ payload)) = pprintPayload payload
 
-pprintFocus :: Maybe (Either History Value) -> App T.Text
-pprintFocus Nothing = pure "?"
-pprintFocus (Just (Right val)) = pure (pprintValue val)
-pprintFocus (Just (Left history)) = pprintHistory history
+pprintPayload :: Maybe (Either Focus Value) -> App T.Text
+pprintPayload Nothing = pure "?"
+pprintPayload (Just (Right val)) = pure (pprintValue val)
+pprintPayload (Just (Left focus)) = do
+  inner <- pprintFocus focus
+  pure ("history -> " <> inner)
 
 pathToName :: FilePath -> T.Text
 pathToName = T.pack . takeBaseName
@@ -56,40 +60,40 @@ pathToName = T.pack . takeBaseName
 topLevel :: Function -> [Expr] -> Expr
 topLevel f = ECall (ELit (Func f))
 
-eval :: Expr -> App (Either History Value)
+eval :: Expr -> App (Either Focus Value)
 eval (ELit (Var v)) = Left <$> evalVar v
 eval (ELit value) = pure (Right value)
-eval (EHist hexpr ops) = Left <$> evalHistOps hexpr ops
+eval (EHist focusExpr ops) = Left <$> evalHistOps focusExpr ops
 eval (EDeref expr) = evalDeref expr
-eval (EAdd lexpr rexpr) = evalAdd lexpr rexpr
-eval (EMul lexpr rexpr) = evalMul lexpr rexpr
-eval (ESub lexpr rexpr) = evalSub lexpr rexpr
-eval (EDiv lexpr rexpr) = evalDiv lexpr rexpr
+eval (EAdd lexpr rexpr) = Right <$> evalBinOp (+) lexpr rexpr
+eval (EMul lexpr rexpr) = Right <$> evalBinOp (*) lexpr rexpr
+eval (ESub lexpr rexpr) = Right <$> evalBinOp (-) lexpr rexpr
+eval (EDiv lexpr rexpr) = Right <$> evalBinOp div lexpr rexpr
 eval (ECall fexpr argExprs) = Left <$> evalFunCall fexpr argExprs
 
-evalVar :: Variable -> App History
+evalVar :: Variable -> App Focus
 evalVar v = do
-  Frame _ historiesRef <- currentFrame
-  histories <- liftIO (readIORef historiesRef)
-  case M.lookup v histories of
-    Just h -> pure h
+  Frame _ fociRef <- currentFrame
+  foci <- liftIO (readIORef fociRef)
+  case M.lookup v foci of
+    Just focus -> pure focus
     Nothing -> do
-      h <- emptyHistory (Just v)
-      let histories' = M.insert v h histories
-      liftIO $ writeIORef historiesRef histories'
-      pure h
+      focus <- emptyFocus (Just v)
+      let foci' = M.insert v focus foci
+      liftIO $ writeIORef fociRef foci'
+      pure focus
 
-emptyHistory :: Maybe Variable -> App History
-emptyHistory mv = History mv Nothing <$> new [] <*> pure Nothing
-  where
-    new = liftIO . newIORef
+emptyFocus :: Maybe Variable -> App Focus
+emptyFocus mv =
+  Focus mv
+    <$> (History Nothing <$> liftIO (newIORef []) <*> pure Nothing)
 
-evalHistOps :: Expr -> [HistOp] -> App History
+evalHistOps :: Expr -> [HistOp] -> App Focus
 evalHistOps expr ops = do
-  hist <- evalToHist expr
+  hist <- evalToFocus expr
   foldlM applyHistOp hist ops
 
-applyHistOp :: History -> HistOp -> App History
+applyHistOp :: Focus -> HistOp -> App Focus
 applyHistOp hist (HistParent expr) = do
   n <- evalToInt expr
   when (n < 0) $ throwYesterday (YesterdayError ("~ must receive a non-negative argument, not " <> T.pack (show n)))
@@ -99,8 +103,8 @@ applyHistOp hist (HistChild expr) = do
   when (n < 1) $ throwYesterday (YesterdayError ("^ must receive a positive argument, not " <> T.pack (show n)))
   walkChild hist n
 
-evalToHist :: Expr -> App History
-evalToHist expr = do
+evalToFocus :: Expr -> App Focus
+evalToFocus expr = do
   mHist <- eval expr
   case mHist of
     Right e -> throwYesterday (YesterdayTypeError "history" (pprintValue e))
@@ -109,88 +113,143 @@ evalToHist expr = do
 evalToInt :: Expr -> App Integer
 evalToInt expr = do
   result <- eval expr
-  mValue <- case result of
-    Left eHist -> focusOfHistory eHist
-    Right value -> pure (Just value)
 
-  case mValue of
-    Nothing -> throwYesterday (YesterdayTypeError "integer" "?")
-    Just v -> case v of
-      IntegerLit n -> pure n
-      x -> throwYesterday (YesterdayTypeError "integer" (pprintValue x))
+  value <- case result of
+    Left (Focus _ (History _ _ Nothing)) -> throwYesterday (YesterdayTypeError "integer" "?")
+    Left (Focus _ (History _ _ (Just (Left _)))) -> paradox
+    Left (Focus _ (History _ _ (Just (Right value)))) -> pure value
+    Right value -> pure value
 
-walkParent :: History -> Integer -> App History
-walkParent hist 0 = pure hist
-walkParent (History _ Nothing _ _) _ = paradox
-walkParent (History _ (Just h) _ _) n = walkParent h (n - 1)
+  case value of
+    IntegerLit n -> pure n
+    x -> throwYesterday (YesterdayTypeError "integer" (pprintValue x))
 
-walkChild :: History -> Integer -> App History
-walkChild (History _ _ childRef _) n = do
+walkParent :: Focus -> Integer -> App Focus
+walkParent focus 0 = pure focus
+walkParent (Focus _ (History Nothing _ _)) _ = throwYesterday YesterdayIllegalRefocus
+walkParent (Focus mv (History (Just (h, _)) _ _)) n = walkParent (Focus mv h) (n - 1)
+
+walkChild :: Focus -> Integer -> App Focus
+walkChild (Focus mv (History _ childRef _)) n = do
   children <- liftIO (readIORef childRef)
 
   let n' = fromIntegral n
 
   if n' <= length children
-    then pure (children !! (n' - 1))
-    else paradox
+    then pure (Focus mv (children !! (n' - 1)))
+    else throwYesterday YesterdayIllegalRefocus
 
-focusOfHistory :: History -> App (Maybe Value)
-focusOfHistory (History _ _ _ Nothing) = pure Nothing
-focusOfHistory (History _ _ _ (Just (Left history))) = focusOfHistory history
-focusOfHistory (History _ _ _ (Just (Right value))) = pure (Just value)
-
-evalDeref :: Expr -> App (Either History Value)
+evalDeref :: Expr -> App (Either Focus Value)
 evalDeref expr = do
-  History _ _ _ payload <- evalToHist expr
+  (Focus _ (History _ _ payload)) <- evalToFocus expr
   maybe paradox pure payload
 
-evalAdd :: Expr -> Expr -> App Integer
-evalAdd lexpr rexpr = do
-  (evalToInt lexpr) + (evalToInt rexpr)
+evalBinOp :: (Integer -> Integer -> Integer) -> Expr -> Expr -> App Value
+evalBinOp op lhs rhs = IntegerLit <$> (op <$> evalToInt lhs <*> evalToInt rhs)
 
-evalMul :: Expr -> Expr -> App Integer
-evalMul lexpr rexpr = do
-  (evalToInt lexpr) * (evalToInt rexpr)
+getRoot :: Focus -> Focus
+getRoot (Focus mv h) = Focus mv h'
+  where
+    (h', _) = getRoot' h
 
-evalSub :: Expr -> Expr -> App Integer
-evalSub lexpr rexpr = do
-  (evalToInt lexpr) - (evalToInt rexpr)
+getRoot' :: History -> (History, [Int])
+getRoot' (History (Just (h, n)) _ _) = fmap (n :) (getRoot' h)
+getRoot' h@(History Nothing _ _) = (h, [])
 
-evalDiv :: Expr -> Expr -> App Integer
-evalDiv lexpr rexpr = do
-  (evalToInt lexpr) / (evalToInt rexpr)
+copyHist :: Focus -> Maybe Variable -> App Focus
+copyHist (Focus _ h) mv =
+  let (root, revPath) = getRoot' h
 
-getRoot :: History -> History
-getRoot hist = do
-  case (parent hist) of
-    Nothing -> pure hist
-    Just h -> getRoot h
+      unwind h' [] = pure h'
+      unwind (History _ childrenRef _) (n : ns) = do
+        children <- readIORef childrenRef
+        unwind (children !! n) ns
+   in do
+        copied <- copyHist' root
+        let (copied', _) = getRoot' copied
+        Focus mv <$> unwind copied' (reverse revPath)
 
-copyHist :: History -> T.Text -> History
-copyHist hist name = undefined
+copyHist' :: History -> App History
+copyHist' (History parent childrenRef payload) = History parent <$> childrenRef' <*> pure payload
+  where
+    childrenRef' = readIORef childrenRef >>= mapM copyHist' >>= newIORef
 
-evalGets :: Expr -> Expr -> App History
-evalGets lexpr rexpr = do
-  lhist <- evalToHist lexpr
-  rhist <- evalToHist rexpr
-
+-- evalGets :: Expr -> Expr -> App History
+-- evalGets lexpr rexpr = do
+--   lhist <- evalToFocus lexpr
+--   rhist <- evalToFocus rexpr
 
 evalToFun :: Expr -> App Function
 evalToFun = undefined
 
-evalFunCall :: Expr -> [Expr] -> App History
+evalToBool :: Expr -> App Bool
+evalToBool expr =
+  let handler :: YesterdayIllegalRefocus -> App (Either Focus Value)
+      handler _ = pure (Right (BoolLit False))
+   in do
+        result <- handle handler (eval expr) -- Illegal refocuses are falsy
+        let value = case result of
+              Left _ -> BoolLit True
+              Right x -> x
+        case value of
+          BoolLit n -> pure n
+          x -> throwYesterday (YesterdayTypeError "bool" (pprintValue x))
+
+evalFunCall :: Expr -> [Expr] -> App Focus
 evalFunCall fexpr argExprs = do
   fun <- evalToFun fexpr
-  args <- mapM evalToHist argExprs
+  args <- mapM evalToFocus argExprs
   frame <- pushFrame fun
 
-  let hRefs = _histories frame
-  forM_ args $ \hist@(History mvar _ _ _) -> do
+  let fociRefs = _foci frame
+  forM_ args $ \focus@(Focus mvar _) -> do
     case mvar of
       Nothing -> pure ()
-      Just var -> liftIO $ modifyIORef' hRefs (M.insert var hist)
+      Just var -> liftIO $ modifyIORef' fociRefs (M.insert var focus)
 
-  evalFunction frame fun args
+  result <- evalFunction frame fun
+  popFrame
+  pure result
 
-evalFunction :: Frame -> Function -> [History] -> App History
-evalFunction = undefined
+evalFunction :: Frame -> Function -> App Focus
+evalFunction frame func@(Function _ resultVar clauses) =
+  let f [] = pure Nothing
+      f (c@(Clause check _) : cs) = do
+        match <- evalToBool check
+        if match
+          then pure (Just c)
+          else f cs
+
+      finishFunc = do
+        foci <- readIORef (_foci frame)
+        case M.lookup resultVar foci of
+          Nothing -> emptyFocus (Just resultVar)
+          Just result -> pure result
+
+      applyAction (WriteStdout expr) = do
+        x <- eval expr
+        pprint x >>= liftIO . TIO.hPutStrLn stdout
+      applyAction (WriteStderr expr) = do
+        x <- eval expr
+        pprint x >>= liftIO . TIO.hPutStrLn stderr
+      applyAction (Gets lhs rhs) = void (applyGets lhs rhs)
+      applyAction (PlusGets lhs rhs) = undefined -- void (applyPlusGets lhs rhs)
+   in do
+        mayMatchingClause <- f clauses
+
+        case mayMatchingClause of
+          Nothing -> finishFunc
+          Just (Clause _ actions) -> mapM_ applyAction actions >> evalFunction frame func
+
+applyGets :: Expr -> Expr -> App Focus
+applyGets lhs rhs = do
+  Focus mv (History _ childrenRef _) <- evalToFocus lhs
+  branch <- evalToFocus rhs >>= (`copyHist` mv)
+  let (Focus _ (History _ branchRootChildrenRef _)) = getRoot branch
+  branchRootChildren <- readIORef branchRootChildrenRef
+  atomicModifyIORef' childrenRef (\children -> (children <> branchRootChildren, ()))
+  pure branch
+
+-- applyPlusGets :: Expr -> Expr -> App Focus
+-- applyPlusGets lhs rhs = do
+--   Focus mv (History _ childrenRef _) <- evalToFocus lhs

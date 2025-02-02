@@ -43,6 +43,7 @@ library
                     , recursion-schemes
                     , text
                     , vector
+                    , unliftio
 
 executable yesterday
     import:           warnings
