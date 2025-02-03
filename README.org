@@ -24,7 +24,7 @@ A time-based programming language.
 ~Reverse~
 #+begin_src prog
   x -> y
-  x~ :: y <+ @x, x <- x~
+  x~ :: y <+ @x, x~
 #+end_src
 
 *** Simplify history
@@ -48,8 +48,8 @@ A time-based programming language.
   x y -> result
   x~   & y~   & x <= y      :: z <+ @x, x~
   x~   & y~   & x >  y      :: z <+ @y, y~
-  !? x & y~   & null result :: result <~ z <- Reverse y
-  x~   & !? y & null result :: result <~ z <- Reverse x
+  !? x & y~   & null result :: result <- z <- Reverse y
+  x~   & !? y & null result :: result <- z <- Reverse x
 #+end_src
 
 *** Divide a list in two

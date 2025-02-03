@@ -15,12 +15,14 @@ newtype Variable = Variable
   {varName :: T.Text}
   deriving (Show, Eq, Ord)
 
-data Clause = Clause Expr [Action]
+data Clause = Clause Expr [Expr]
   deriving (Show)
 
 data Expr
   = ELit Value
   | EHist Expr [HistOp]
+  | EGets Expr Expr
+  | EPlusGets Expr Expr
   | EDeref Expr
   | EAdd Expr Expr
   | EMul Expr Expr
@@ -28,9 +30,17 @@ data Expr
   | EDiv Expr Expr
   | EEq Expr Expr
   | ENEq Expr Expr
+  | ELT Expr Expr
+  | ELE Expr Expr
+  | EGT Expr Expr
+  | EGE Expr Expr
   | ECall Expr [Expr]
   | EAction Action Expr
-  | EAction2 Action Expr Expr
+  | EAnd Expr Expr
+  | EOr Expr Expr
+  | ENull Variable
+  | EInterrobang Expr
+  | EHistLit Expr
   deriving (Show)
 
 data HistOp
@@ -39,22 +49,14 @@ data HistOp
   deriving (Show)
 
 data Action
-  = -- | Computation evolution.
-    Gets Expr Expr
-  | -- | Append new value to history
-    PlusGets Expr Expr
-  | -- | Refocus a history
-    Refocus Expr
-  | -- | Print to stdout
-    WriteStdout Expr
+  = -- | Print to stdout
+    WriteStdout
   | -- | Print to stderr
-    WriteStderr Expr
+    WriteStderr
   deriving (Show)
 
 data Value
-  = -- | The _ wildcard matching anything but the empty history
-    AnyLit
-  | -- | A boolean literal
+  = -- | A boolean literal
     BoolLit Bool
   | -- | An integer literal
     IntegerLit Integer
@@ -64,10 +66,12 @@ data Value
     Var Variable
   | -- | A function
     Func Function
+  | -- | Uninterseting side effect
+    SideEffect
   deriving (Show)
 
 data History = History
-  { _parent :: Maybe (History, Int),
+  { _parent :: Maybe (History, IORef Int),
     _children :: IORef [History],
     _payload :: Maybe (Either Focus Value)
   }

@@ -6,6 +6,7 @@ import Data.Foldable
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import System.Exit
 import System.FilePath
 import System.IO
 import UnliftIO
@@ -69,7 +70,21 @@ eval (EAdd lexpr rexpr) = Right <$> evalBinOp (+) lexpr rexpr
 eval (EMul lexpr rexpr) = Right <$> evalBinOp (*) lexpr rexpr
 eval (ESub lexpr rexpr) = Right <$> evalBinOp (-) lexpr rexpr
 eval (EDiv lexpr rexpr) = Right <$> evalBinOp div lexpr rexpr
+eval (EEq lhs rhs) = Right . BoolLit <$> evalEQ lhs rhs
+eval (ENEq lhs rhs) = Right . BoolLit <$> evalNotEQ lhs rhs
+eval (ELT lhs rhs) = Right . BoolLit <$> evalLT lhs rhs
+eval (ELE lhs rhs) = Right . BoolLit <$> evalLE lhs rhs
+eval (EGT lhs rhs) = Right . BoolLit <$> evalGT lhs rhs
+eval (EGE lhs rhs) = Right . BoolLit <$> evalGE lhs rhs
 eval (ECall fexpr argExprs) = Left <$> evalFunCall fexpr argExprs
+eval (EAction action expr) = Right SideEffect <$ applyAction action expr
+eval (EGets lhs rhs) = Left <$> applyGets lhs rhs
+eval (EPlusGets lhs rhs) = Left <$> applyPlusGets lhs rhs
+eval (EAnd lhs rhs) = Right . BoolLit <$> evalAnd lhs rhs
+eval (EOr lhs rhs) = Right . BoolLit <$> evalOr lhs rhs
+eval (ENull x) = Right . BoolLit <$> evalNull x
+eval (EInterrobang x) = Right . BoolLit <$> evalInterrobang x
+eval (EHistLit x) = Left <$> evalHistLit x
 
 evalVar :: Variable -> App Focus
 evalVar v = do
@@ -110,6 +125,74 @@ evalToFocus expr = do
     Right e -> throwYesterday (YesterdayTypeError "history" (pprintValue e))
     Left h -> pure h
 
+evalToValueWithOneDereference :: Expr -> App Value
+evalToValueWithOneDereference expr = do
+  result <- eval expr
+  case result of
+    Right x -> pure x
+    Left (Focus _ (History _ _ (Just (Right x)))) -> pure x
+    Left (Focus _ _) -> paradox
+
+evalToBoolWithOneDereference :: Expr -> App Bool
+evalToBoolWithOneDereference expr = do
+  result <- evalToValueWithOneDereference expr
+  case result of
+    BoolLit x -> pure x
+    _ -> paradox
+
+evalLT :: Expr -> Expr -> App Bool
+evalLT lhs rhs = do
+  l <- evalToValueWithOneDereference lhs
+  r <- evalToValueWithOneDereference rhs
+
+  case (l, r) of
+    (BoolLit x, BoolLit y) -> pure (x < y)
+    (IntegerLit x, IntegerLit y) -> pure (x < y)
+    (StringLit x, StringLit y) -> pure (x < y)
+    _ -> paradox
+
+evalLE :: Expr -> Expr -> App Bool
+evalLE lhs rhs = not <$> evalGT lhs rhs
+
+evalGT :: Expr -> Expr -> App Bool
+evalGT lhs rhs = evalLT rhs lhs
+
+evalGE :: Expr -> Expr -> App Bool
+evalGE lhs rhs = not <$> evalLT lhs rhs
+
+evalEQ :: Expr -> Expr -> App Bool
+evalEQ lhs rhs = (&&) <$> evalLE lhs rhs <*> evalGE lhs rhs
+
+evalAnd :: Expr -> Expr -> App Bool
+evalAnd lhs rhs = (&&) <$> evalToBool lhs <*> evalToBool rhs
+
+evalOr :: Expr -> Expr -> App Bool
+evalOr lhs rhs = (||) <$> evalToBool lhs <*> evalToBool rhs
+
+evalNotEQ :: Expr -> Expr -> App Bool
+evalNotEQ lhs rhs = not <$> evalEQ lhs rhs
+
+-- eval (EInterrobang x) = Right . BoolLit <$> evalInterrobang x
+-- eval (EHistLit x) = Left <$> evalHistLit x
+
+evalNull :: Variable -> App Bool
+evalNull var = do
+  Frame _ fociRef <- currentFrame
+  foci <- liftIO $ readIORef fociRef
+  pure (M.member var foci)
+
+evalInterrobang :: Expr -> App Bool
+evalInterrobang expr = do
+  result <- eval expr
+  case result of
+    Left (Focus _ (History _ _ Nothing)) -> pure True
+    _ -> pure False
+
+evalHistLit :: Expr -> App Focus
+evalHistLit expr = do
+  root <- emptyFocus Nothing
+  applyPlusGets' root expr
+
 evalToInt :: Expr -> App Integer
 evalToInt expr = do
   result <- eval expr
@@ -147,26 +230,26 @@ evalDeref expr = do
 evalBinOp :: (Integer -> Integer -> Integer) -> Expr -> Expr -> App Value
 evalBinOp op lhs rhs = IntegerLit <$> (op <$> evalToInt lhs <*> evalToInt rhs)
 
-getRoot :: Focus -> Focus
-getRoot (Focus mv h) = Focus mv h'
-  where
-    (h', _) = getRoot' h
+getRoot :: Focus -> App Focus
+getRoot (Focus mv h) = Focus mv . fst <$> getRoot' h
 
-getRoot' :: History -> (History, [Int])
-getRoot' (History (Just (h, n)) _ _) = fmap (n :) (getRoot' h)
-getRoot' h@(History Nothing _ _) = (h, [])
+getRoot' :: History -> App (History, [Int])
+getRoot' (History (Just (h, nRef)) _ _) = do
+  (h', path) <- getRoot' h
+  n <- readIORef nRef
+  pure (h', n : path)
+getRoot' h@(History Nothing _ _) = pure (h, [])
 
 copyHist :: Focus -> Maybe Variable -> App Focus
 copyHist (Focus _ h) mv =
-  let (root, revPath) = getRoot' h
-
-      unwind h' [] = pure h'
+  let unwind h' [] = pure h'
       unwind (History _ childrenRef _) (n : ns) = do
         children <- readIORef childrenRef
         unwind (children !! n) ns
    in do
+        (root, revPath) <- getRoot' h
         copied <- copyHist' root
-        let (copied', _) = getRoot' copied
+        (copied', _) <- getRoot' copied
         Focus mv <$> unwind copied' (reverse revPath)
 
 copyHist' :: History -> App History
@@ -207,12 +290,12 @@ evalFunCall fexpr argExprs = do
       Nothing -> pure ()
       Just var -> liftIO $ modifyIORef' fociRefs (M.insert var focus)
 
-  result <- evalFunction frame fun
+  result <- evalFunction frame
   popFrame
   pure result
 
-evalFunction :: Frame -> Function -> App Focus
-evalFunction frame func@(Function _ resultVar clauses) =
+evalFunction :: Frame -> App Focus
+evalFunction frame@(Frame (Function _ resultVar clauses) focusRefs) =
   let f [] = pure Nothing
       f (c@(Clause check _) : cs) = do
         match <- evalToBool check
@@ -221,35 +304,70 @@ evalFunction frame func@(Function _ resultVar clauses) =
           else f cs
 
       finishFunc = do
-        foci <- readIORef (_foci frame)
+        foci <- readIORef focusRefs
         case M.lookup resultVar foci of
           Nothing -> emptyFocus (Just resultVar)
           Just result -> pure result
-
-      applyAction (WriteStdout expr) = do
-        x <- eval expr
-        pprint x >>= liftIO . TIO.hPutStrLn stdout
-      applyAction (WriteStderr expr) = do
-        x <- eval expr
-        pprint x >>= liftIO . TIO.hPutStrLn stderr
-      applyAction (Gets lhs rhs) = void (applyGets lhs rhs)
-      applyAction (PlusGets lhs rhs) = undefined -- void (applyPlusGets lhs rhs)
    in do
         mayMatchingClause <- f clauses
 
-        case mayMatchingClause of
-          Nothing -> finishFunc
-          Just (Clause _ actions) -> mapM_ applyAction actions >> evalFunction frame func
+        mFocus <- case mayMatchingClause of
+          Nothing -> fmap Just finishFunc
+          Just (Clause _ exprs) -> do
+            forM_ exprs $ \expr -> do
+              result <- eval expr
+              case result of
+                Left focus@(Focus (Just var) _) -> modify' focusRefs (M.insert var focus)
+                _ -> pure ()
+            pure Nothing
+
+        maybe (evalFunction frame) pure mFocus
+
+applyAction :: Action -> Expr -> App ()
+applyAction WriteStdout expr = do
+  x <- eval expr
+  pprint x >>= liftIO . TIO.hPutStrLn stdout
+applyAction WriteStderr expr = do
+  x <- eval expr
+  pprint x >>= liftIO . TIO.hPutStrLn stderr
+
+evalGets :: Expr -> Expr -> App Focus
+evalGets = undefined
+
+evalPlusGets :: Expr -> Expr -> App Focus
+evalPlusGets = undefined
 
 applyGets :: Expr -> Expr -> App Focus
-applyGets lhs rhs = do
-  Focus mv (History _ childrenRef _) <- evalToFocus lhs
-  branch <- evalToFocus rhs >>= (`copyHist` mv)
-  let (Focus _ (History _ branchRootChildrenRef _)) = getRoot branch
-  branchRootChildren <- readIORef branchRootChildrenRef
-  atomicModifyIORef' childrenRef (\children -> (children <> branchRootChildren, ()))
-  pure branch
+applyGets lhs rhs =
+  let adjustChildren offset children = forM_ children $ \(History parent _ _) -> do
+        case parent of
+          Nothing -> pure () -- Impossible
+          Just (_, cRef) -> modify' cRef (+ offset)
+   in do
+        Focus mv (History _ childrenRef _) <- evalToFocus lhs
+        lhsChildren <- readIORef childrenRef
+        let offset = length lhsChildren
 
--- applyPlusGets :: Expr -> Expr -> App Focus
--- applyPlusGets lhs rhs = do
---   Focus mv (History _ childrenRef _) <- evalToFocus lhs
+        branch <- evalToFocus rhs >>= (`copyHist` mv)
+        Focus _ (History _ branchRootChildrenRef _) <- getRoot branch
+        branchRootChildren <- readIORef branchRootChildrenRef
+        adjustChildren offset branchRootChildren
+
+        modify' childrenRef (<> branchRootChildren)
+        pure branch
+
+applyPlusGets :: Expr -> Expr -> App Focus
+applyPlusGets lhs rhs = do
+  focus <- evalToFocus lhs
+  applyPlusGets' focus rhs
+
+applyPlusGets' :: Focus -> Expr -> App Focus
+applyPlusGets' (Focus mv parent@(History _ childrenRef _)) rhs = do
+  childCount <- length <$> readIORef childrenRef
+  childNumRef <- newIORef childCount
+  child <- History (Just (parent, childNumRef)) <$> newIORef [] <*> (Just <$> eval rhs)
+  modify' childrenRef (<> [child])
+  pure (Focus mv child)
+
+modify' :: IORef a -> (a -> a) -> App ()
+modify' ref f = liftIO $ atomicModifyIORef' ref (\x -> (f x, ()))
